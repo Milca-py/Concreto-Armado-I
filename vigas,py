@@ -1,0 +1,307 @@
+from math import sqrt
+import math
+import matplotlib.patches as patches
+import matplotlib.pyplot as plt
+import plotly.graph_objects as go
+
+##########################################################################################################
+
+
+class VigaR:
+    def __init__(self, Mu, b, h, r, fc, fy, phi=0.9):
+        self.Mu = Mu*10**5
+        self.b = b
+        self.h = h
+        self.r = r
+        self.rr = r    # Agregar en el contructor rr = d' , se toma x defecto d' = r
+        self.d = self.h - self.r
+        self.fc = fc
+        self.fy = fy
+        self.phi = phi
+        self.β1 = 0.85-0.05*(self.fc-280)/70 if self.fc >= 280 else 0.85
+
+    def pb(self):
+        return 0.85*self.fc/self.fy*self.β1*6000/(6000+self.fy)
+
+    def pmax(self):     # CAMBIAR A 0.5 PARA ESTRUCTURAS DE ESPECIALES O  MUY DUCTILES
+        return 0.75*self.pb()
+
+    def Asmin(self):
+        Asmin = max(0.7 * (self.fc)**0.5 / self.fy *
+                    self.b * self.d, 14/self.fy*self.b*self.d)
+        return Asmin
+
+    def Asmax(self):
+        Asmax = self.pmax()*self.b*self.d
+        return Asmax
+
+    def a(self):
+        return self.Asmax()*self.fy/(0.85*self.fc*self.b)
+
+    def Mut(self):
+        return self.phi*self.Asmax()*self.fy*(self.d-0.5*self.a())
+
+    def As(self):
+        if self.Mut() > self.Mu:    # No requiere acero en compresion
+            Asc = self.Asmin()
+            Ass = 0.85 * self.b * self.d * self.fc / self.fy * \
+                (1 - (1 - 2 * self.Mu / (0.85 * self.phi * self.b * self.d**2 * self.fc))**0.5)
+            if Ass < self.Asmin():
+                Ast = self.Asmin()
+            else:
+                Ast = Ass
+
+        else:                       # Requiere acero en compresion
+            dd = self.d / self.rr
+            ddm = 0.85*self.fc*self.β1*6300 / \
+                ((6300-self.fy)*self.pmax()*self.fy)
+            As1 = self.Asmax()
+            Mu2 = self.Mu-self.Mut()
+            As2 = Mu2/(self.phi*self.fy*(self.d-self.rr))
+
+            if dd >= ddm:                   # fluye el acero en compresion
+                if As2 < self.Asmin():
+                    Asc = self.Asmin()
+                else:
+                    Asc = As2
+            else:                           # No fluye el acero en traccion
+                fs = (self.a()-self.β1*self.rr)/self.a()*0.003*2*10**6
+                if As2*self.fy/fs < self.Asmin():
+                    Asc = self.Asmin()
+                else:
+                    Asc = As2*self.fy/fs
+                # Asc = As2*self.fy/fs
+            Ast = As1+As2
+        As = {'Asc = A\'s': Asc, 'Ast': Ast}
+        return As
+
+    def plot(self, K=10):
+        Asc = self.As()['Asc = A\'s']
+        Ast = self.As()['Ast']
+        # Definir los puntos de las esquinas
+        p1 = (-self.b/2, 0)
+        p2 = (self.b/2, 0)
+        p3 = (self.b/2, self.h)
+        p4 = (-self.b/2, self.h)
+
+        # Puntos del área de acero en traccion
+        s1 = (-self.b/2 + self.r / 2, 1.2*self.r / 2)
+        s2 = (-self.b/2 + self.r / 2, 0.8*self.r / 2 + self.r)
+        s3 = (self.b/2 - self.r / 2, 0.8*self.r / 2 + self.r)
+        s4 = (self.b/2 - self.r / 2, 1.2*self.r / 2)
+
+        # puntos del acero en compresion
+        s5 = ((self.b - self.rr) / 2, self.h - 1.2*self.rr / 2)
+        s6 = ((self.b - self.rr) / 2, self.h - 0.8*self.rr / 2 - self.rr)
+        s7 = (-(self.b - self.rr) / 2, self.h - 0.8*self.rr / 2 - self.rr)
+        s8 = (-(self.b - self.rr) / 2, self.h - 1.2*self.rr / 2)
+
+        # Crear la figura y los ejes
+        fig, ax = plt.subplots(figsize=(K, K))
+
+        # Definir los vértices del polígono
+        vertices = [p1, p2, p3, p4]
+        As_vertices_t = [s1, s2, s3, s4]
+        As_vertices_c = [s5, s6, s7, s8]
+
+        # Dibujar el polígono que representa la sección de la viga Rectangular
+        polygon = patches.Polygon(
+            vertices, closed=True, edgecolor='#333333', facecolor='#d9d9d9', alpha=1)
+        As_vert_t = patches.Polygon(
+            As_vertices_t, closed=True, edgecolor='#333333', facecolor='#ffabc7', alpha=1)
+        As_vert_c = patches.Polygon(
+            As_vertices_c, closed=True, edgecolor='#333333', facecolor='#ffabc7', alpha=1)
+        ax.add_patch(polygon)
+        ax.add_patch(As_vert_t)
+        ax.add_patch(As_vert_c)
+
+        # agregar anotaciones de As
+        ax.annotate(f'A\'s = {Asc:.2f}', xy=(self.b / 2 - self.rr/2, self.h - self.rr), xytext=((self.b) / 2 + 4, self.h - self.rr),
+                    arrowprops=dict(facecolor='black', arrowstyle='->'))
+
+        ax.annotate(f'Ast = {Ast:.2f}', xy=(self.b / 2 - self.r/2, self.r), xytext=((self.b) / 2 + 4, self.r),
+                    arrowprops=dict(facecolor='black', arrowstyle='->'))
+
+        # Configurar los límites de los ejes
+        ax.set_xlim(-self.b / 2 - 10, self.b / 2 + 20)
+        ax.set_ylim(-10, self.h + 10)
+        ax.set_aspect('equal')
+
+        # Configurar grillas
+        ax.grid(True, which='both', color='black',
+                linestyle='-', linewidth=0.1, alpha=0.4)
+
+        # Añadir etiquetas a los ejes
+        ax.set_xlabel('Ancho (cm)', fontsize=10, fontname='Calibri',
+                      fontstyle='italic', color='black', fontweight='bold')
+        ax.set_ylabel('Altura (cm)', fontsize=10, fontname='Calibri',
+                      fontstyle='italic', color='black', fontweight='bold')
+
+        # Configurar las etiquetas numéricas de los ejes
+        ax.tick_params(axis='both', which='both',
+                       labelsize=10, labelcolor='black')
+        for label in ax.get_xticklabels() + ax.get_yticklabels():
+            label.set_fontname('Calibri')
+            label.set_fontsize(10)
+            label.set_color('black')
+
+        # Título del gráfico
+        ax.set_title('Sección de la viga', fontsize=12,
+                     fontweight='bold', fontname='Franklin Gothic Heavy', color='black')
+
+        # Mostrar la figura
+        plt.show()
+
+    def ploti(self):
+        Asc = self.As()['Asc = A\'s']
+        Ast = self.As()['Ast']
+        # Definir los puntos de las esquinas
+        p1 = (-self.b/2, 0)
+        p2 = (self.b/2, 0)
+        p3 = (self.b/2, self.h)
+        p4 = (-self.b/2, self.h)
+
+        # Puntos del área de acero en traccion
+        s1 = (-self.b/2 + self.r / 2, 1.2*self.r / 2)
+        s2 = (-self.b/2 + self.r / 2, 0.8*self.r / 2 + self.r)
+        s3 = (self.b/2 - self.r / 2, 0.8*self.r / 2 + self.r)
+        s4 = (self.b/2 - self.r / 2, 1.2*self.r / 2)
+
+        # puntos del acero en compresion
+        s5 = ((self.b - self.r) / 2, self.h - 1.2*self.r / 2)
+        s6 = ((self.b - self.r) / 2, self.h - 0.8*self.r / 2 - self.r)
+        s7 = (-(self.b - self.r) / 2, self.h - 0.8*self.r / 2 - self.r)
+        s8 = (-(self.b - self.r) / 2, self.h - 1.2*self.r / 2)
+
+        # Definir los vértices del polígono
+        vertices = [p1, p2, p3, p4]
+        As_vertices_t = [s1, s2, s3, s4]
+        As_vertices_c = [s5, s6, s7, s8]
+
+        # Crear la figura usando Plotly
+        fig = go.Figure()
+
+        # Añadir el polígono que representa la sección de la viga Rectangular
+        fig.add_trace(go.Scatter(
+            x=[v[0] for v in vertices] + [vertices[0][0]],
+            y=[v[1] for v in vertices] + [vertices[0][1]],
+            fill='toself',
+            line=dict(color='black'),
+            fillcolor='rgba(217, 217, 217, 0.8)',
+            mode='lines',
+            name=f'Viga {self.b}x{self.h} cm'
+        ))
+
+        # Añadir el área de acero en tracción
+        fig.add_trace(go.Scatter(
+            x=[v[0] for v in As_vertices_t] + [As_vertices_t[0][0]],
+            y=[v[1] for v in As_vertices_t] + [As_vertices_t[0][1]],
+            fill='toself',
+            line=dict(color='black'),
+            fillcolor='rgba(255, 171, 199, 0.8)',
+            mode='lines',
+            name=f'A\'s = {Ast:.2f} cm2'
+        ))
+
+        # Añadir el área de acero en compresión
+        fig.add_trace(go.Scatter(
+            x=[v[0] for v in As_vertices_c] + [As_vertices_c[0][0]],
+            y=[v[1] for v in As_vertices_c] + [As_vertices_c[0][1]],
+            fill='toself',
+            line=dict(color='black'),
+            fillcolor='rgba(255, 171, 199, 0.8)',
+            mode='lines',
+            name=f'Ast = {Asc:.2f} cm2'
+        ))
+
+        # Configurar los límites de los ejes y la misma escala
+        fig.update_layout(
+            xaxis=dict(range=[-self.b / 2, self.b / 2], scaleanchor='y',
+                       scaleratio=1, zeroline=False, showgrid=False),
+            yaxis=dict(range=[0, self.h], zeroline=False, showgrid=False),
+            xaxis_title='Ancho (cm)',
+            yaxis_title='Altura (cm)',
+            title='Sección Transversal de una Viga T',
+            showlegend=False,
+            plot_bgcolor='white',
+            width=800,
+            height=800
+        )
+
+        # Mostrar la figura
+        fig.show()
+
+
+# TESTING#################################################################################################
+# viga = VigaR(Mu=45, b=25, h=60, r=6, fc=210, fy=4200)
+# print(f"Area de acero = {viga.As()}")
+# for valor in viga.As().values():
+#     print(f"{valor:.2f}")
+# viga.plot()
+# viga.ploti()
+##########################################################################################################
+
+
+def elegir_varillas(as_requerido, b, rr, df):
+    mejor_error = float('inf')
+    mejor_opcion = {3: '1/2'}
+    cumple_espaciamiento = "no cumple"
+
+    for index, row in df.iterrows():
+        av = row['Sección [cm2]']
+        # Asegurarse de que sean al menos 2 varillas
+        num_varillas = max(2, math.ceil(as_requerido / av))
+        error = abs((num_varillas * av - as_requerido) / as_requerido)
+
+        # Verificar espaciamiento de varillas
+        diametro_mm = row['Diámetro [mm]']
+        sep_min = 2.54  # Separación mínima en cm
+        espacio_necesario = (num_varillas * diametro_mm / 10) + \
+            ((num_varillas - 1) * sep_min) + 2 * rr
+
+        if espacio_necesario <= b and error < mejor_error:
+            mejor_error = error
+            mejor_opcion = {num_varillas: row['Diámetro [Pulg]']}
+            cumple_espaciamiento = "cumple"
+
+    return mejor_opcion, cumple_espaciamiento, error
+
+
+def calcular_estribos(Vumax, b, h, r, L, fc, fy, de, dt, n, SE, Øcorte=0.85, zona_es_sismica=True):
+    d = h - r  # m
+    # calculo de la corte maximmo a distancia de d de la columna
+    Vu = Vumax*10**3
+    # corte que absorbe el concreto
+    Vc = Øcorte * 0.53 * sqrt(fc) * b*100 * d*100
+
+    # corte que absorbe el acero
+    Vs, Av = Vu - Vc, n*(de*100/2)**2*3.1416
+    S = int((Øcorte*Av*fy*d*100/(Vs))/5)*5
+
+    # espaciamiento maximo
+    Vcc = Øcorte*1.1*fc**0.5*b*100*d*100
+    Smax = int((min(d*100/2, 60) if Vs <= Vcc else min(d*100/4, 30))/5)*5
+
+    # chequeo por sismo
+    if zona_es_sismica:
+        So = int(
+            (min(d*100/4, 10*dt*100 if SE == "Dual1" else 8*dt*100, 24*de*100, 30))/5)*5
+    else:
+        So = 500
+
+    # nuemero, espaciamiento de estribos
+    Str1, Ntr1 = min(S/2, Smax/2, So/2), 1
+    Str2, Ntr2 = min(S, Smax, So), int(2*h*100/min(S, Smax, So))
+    Str3, Ntr3 = Smax, int((L*100-2*Str1*Ntr1-2*Str2*Ntr2)/Smax)
+    if Vs < 0:
+        tramos = [
+            (1, Smax/200),  # (número de estribos, espaciamiento)
+            (int((L*100-2*Smax)/Smax), Smax/100)
+        ]
+    else:
+        tramos = [
+            (Ntr1, Str1/100),  # (número de estribos, espaciamiento)
+            (Ntr2, Str2/100),
+            (Ntr3, Str3/100)
+        ]
+    return tramos
